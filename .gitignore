@@ -1,0 +1,8 @@
+.env
+SUCCESSION_LETTER*.md
+sd-models/
+*.safetensors
+*.gguf
+*.bin
+__pycache__/
+*.pyc

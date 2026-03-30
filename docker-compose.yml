@@ -1,0 +1,235 @@
+# =============================================================================
+# Unified Self-Hosted AI Platform — docker-compose.yml
+# Target: Windows 11 + WSL2 + NVIDIA RTX 3060 12GB
+# Services: Ollama (LLM + Code), ChromaDB (vector store),
+#           Automatic1111 (image gen), Open WebUI (UI),
+#           AI Gateway (FastAPI — master API key system)
+#
+# VERIFIED IMAGES (March 2026):
+#   ollama/ollama:latest              — hub.docker.com/r/ollama/ollama
+#   ghcr.io/open-webui/open-webui:main — github.com/open-webui/open-webui
+#   chromadb/chroma:1.5.3             — hub.docker.com/r/chromadb/chroma
+#   ghcr.io/ai-dock/stable-diffusion-webui:latest-cuda
+#
+# PORT MAP (all on localhost):
+#   11434  → Ollama API (internal, not exposed to browser)
+#   8000   → ChromaDB HTTP API (internal)
+#   7860   → Automatic1111 Web UI
+#   3000   → Open WebUI (chat interface)
+#   8080   → AI Gateway (master API — all external calls go here)
+#
+# FIRST-RUN NOTE:
+#   After `docker compose up -d`, pull the two models:
+#     docker exec ollama ollama pull mistral:7b-instruct-q4_K_M
+#     docker exec ollama ollama pull deepseek-coder:6.7b-instruct-q4_K_M
+#   Download a Stable Diffusion checkpoint into ./sd-models/Stable-diffusion/
+#   Recommended: v1-5-pruned-emaonly.safetensors from HuggingFace
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # 1. OLLAMA — serves both chat LLM and code LLM (model switching per request)
+  #    GPU: uses all available VRAM. Listens only on internal Docker network.
+  #    OLLAMA_HOST=0.0.0.0 is required so other containers can reach it.
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+      # Keep models in VRAM between requests (seconds). 0 = unload immediately.
+      # Set to -1 to never unload (uses more VRAM but faster repeated calls).
+      - OLLAMA_KEEP_ALIVE=300
+      # Number of parallel request slots. 1 is safe for 12 GB VRAM.
+      - OLLAMA_NUM_PARALLEL=1
+      # Max loaded models at once. Keep at 1 to avoid OOM on 12 GB.
+      - OLLAMA_MAX_LOADED_MODELS=1
+    volumes:
+      - ollama_data:/root/.ollama
+    # Expose only inside the compose network (not to the host directly)
+    expose:
+      - "11434"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - ai_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # 2. CHROMADB — vector database for RAG document Q&A
+  #    Pinned to 1.5.3 for stability. /data is the correct mount in v1.x.
+  #    Legacy env vars (IS_PERSISTENT, PERSIST_DIRECTORY) are NOT used in v1.x.
+  # ---------------------------------------------------------------------------
+  chromadb:
+    image: chromadb/chroma:1.5.3
+    container_name: chromadb
+    restart: unless-stopped
+    volumes:
+      - chroma_data:/data
+    expose:
+      - "8000"
+    networks:
+      - ai_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # ---------------------------------------------------------------------------
+  # 3. AUTOMATIC1111 — Stable Diffusion image generation
+  #    Image: ghcr.io/ai-dock/stable-diffusion-webui:latest-cuda
+  #    CLI_ARGS: --api enables REST API that the gateway calls programmatically
+  #              --xformers enables memory-efficient attention for RTX 3060
+  #              --medvram optimises for 12 GB cards (use --lowvram if needed)
+  #              --listen makes the server reachable from other containers
+  #    Models go in ./sd-models on the host (bind-mounted for easy file drop).
+  # ---------------------------------------------------------------------------
+  auto1111:
+    image: ghcr.io/ai-dock/stable-diffusion-webui:latest-cuda
+    container_name: auto1111
+    restart: unless-stopped
+    environment:
+      - CLI_ARGS=--api --xformers --medvram --listen --enable-insecure-extension-access
+    ports:
+      - "7860:7860"
+    volumes:
+      - ./sd-models:/workspace/stable-diffusion-webui/models
+      - sd_outputs:/workspace/stable-diffusion-webui/outputs
+      - sd_extensions:/workspace/stable-diffusion-webui/extensions
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - ai_net
+    # NOTE: auto1111 takes 3-5 min to start on first run (downloading deps).
+    # The gateway waits for it with depends_on + service_healthy.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860/sdapi/v1/sd-models"]
+      interval: 30s
+      timeout: 15s
+      retries: 10
+      start_period: 300s
+
+  # ---------------------------------------------------------------------------
+  # 4. OPEN WEBUI — browser chat interface
+  #    Connects to ollama over the internal ai_net network.
+  #    WEBUI_SECRET_KEY: change this to any long random string before deploying.
+  #    VECTOR_DB + CHROMA_* variables wire it to the ChromaDB container for RAG.
+  #    Port 3000 on host → port 8080 inside container.
+  # ---------------------------------------------------------------------------
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_started
+      chromadb:
+        condition: service_started
+    environment:
+      # LLM backend
+      - OLLAMA_BASE_URLS=http://ollama:11434
+      # Auth — change WEBUI_SECRET_KEY to a random 32-char string
+      - WEBUI_SECRET_KEY=5be91120075878c4490a6fb3ee76c8b87039fe8c88ff2ab4d47da9e4096b0e7c
+      - WEBUI_AUTH=true
+      # RAG / Vector DB
+      - VECTOR_DB=chroma
+      - CHROMA_HTTP_HOST=chromadb
+      - CHROMA_HTTP_PORT=8000
+      - CHROMA_TENANT=default_tenant
+      - RAG_EMBEDDING_ENGINE=ollama
+      - RAG_EMBEDDING_MODEL=nomic-embed-text
+      # UI
+      - WEBUI_NAME=LocalAI Platform
+      - CORS_ALLOW_ORIGIN=*
+    ports:
+      - "3000:8080"
+    volumes:
+      - open_webui_data:/app/backend/data
+    networks:
+      - ai_net
+
+  # ---------------------------------------------------------------------------
+  # 5. AI GATEWAY — FastAPI master API key system (the custom glue layer)
+  #    Built from ./gateway/Dockerfile (included in this repo).
+  #    All external callers use this single endpoint on port 8080.
+  #    It routes internally to ollama:11434 / auto1111:7860 / chromadb:8000.
+  #    GATEWAY_API_KEYS: comma-separated list of valid master keys.
+  #    Change these before first run. Generate with: openssl rand -hex 32
+  # ---------------------------------------------------------------------------
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: ai-gateway
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_started
+      chromadb:
+        condition: service_started
+    environment:
+      # Comma-separated master API keys. Add one per user/engineer.
+      - GATEWAY_API_KEYS=sk-local-a62f52c5103574c0e4c6ab920bdcde1418723bda,sk-local-c6a5e36effd412609a9db0d14304c36907360803,sk-local-169a155d804488dca53b6cc5bf1db4c1990b192f
+      # Internal service URLs (Docker DNS resolves container names)
+      - OLLAMA_URL=http://ollama:11434
+      - CHROMADB_URL=http://chromadb:8000
+      - AUTO1111_URL=http://auto1111:7860
+      # Token expiry for JWT mode (seconds). 0 = static key mode only.
+      - JWT_EXPIRY_SECONDS=86400
+      - JWT_SECRET=d74d8a76ed16f2d934de665f392bc5011305dbf947fdda71a1ee048a5b44b2ce
+      # Rate limiting: max requests per key per minute
+      - RATE_LIMIT_PER_MINUTE=60
+      # Log level: info | debug | warning
+      - LOG_LEVEL=info
+    ports:
+      - "8080:8080"
+    networks:
+      - ai_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+# =============================================================================
+# NAMED VOLUMES — all data persists across container restarts/upgrades
+# =============================================================================
+volumes:
+  ollama_data:
+    driver: local
+  chroma_data:
+    driver: local
+  open_webui_data:
+    driver: local
+  sd_outputs:
+    driver: local
+  sd_extensions:
+    driver: local
+
+# =============================================================================
+# NETWORK — single bridge network so all containers resolve each other by name
+# =============================================================================
+networks:
+  ai_net:
+    driver: bridge
+    name: ai_platform_net
