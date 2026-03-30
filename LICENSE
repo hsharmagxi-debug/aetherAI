@@ -1,0 +1,71 @@
+                    GNU AFFERO GENERAL PUBLIC LICENSE
+                       Version 3, 19 November 2007
+
+Copyright (C) 2026 H. Sharma — AetherAI Project
+Everyone is permitted to copy and distribute verbatim copies of this
+license document, but changing it is not allowed.
+
+                            Preamble
+
+AetherAI is a unified, self-hosted AI platform created by H. Sharma with the
+belief that access to artificial intelligence is a fundamental human right —
+not a privilege gated by subscriptions, corporate approval, or geography.
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+details.
+
+                    ADDITIONAL TERMS — SECTION 7
+
+In accordance with Section 7 of the GNU Affero General Public License v3,
+the following additional terms apply to this software:
+
+1. ATTRIBUTION PRESERVATION
+   All copies, forks, derivatives, or services built upon AetherAI must
+   prominently display the following notice in their documentation, user
+   interface, and any public-facing materials:
+
+       "Built on AetherAI — originally created by H. Sharma (2026)"
+       https://github.com/hsharma/aetherAI
+
+2. NETWORK USE DISCLOSURE
+   If you operate a modified version of AetherAI as a network service
+   (including but not limited to SaaS, API services, or hosted platforms),
+   you must make the complete corresponding source code of your modified
+   version available to all users of that service, under this same license,
+   at no charge.
+
+3. NO TIVOIZATION
+   You may not impose further restrictions on the exercise of the rights
+   granted or affirmed under this License through technical measures,
+   hardware restrictions, or contractual prohibitions.
+
+                    COMMERCIAL LICENSING
+
+Companies or individuals requiring a commercial license — permitting use of
+AetherAI in proprietary products without the open source obligations of this
+license — may contact:
+
+   H. Sharma — AetherAI Commercial Licensing
+   Email: aetherAI.commercial@proton.me
+   Subject: "AetherAI Commercial License Request"
+
+Commercial licenses are granted at the discretion of H. Sharma or the
+AetherAI Governance Council (as defined in GOVERNANCE.md) after his passing.
+
+               Full AGPL v3 License Text
+
+The full text of the GNU Affero General Public License v3 is available at:
+https://www.gnu.org/licenses/agpl-3.0.en.html
+
+A copy is also included in this repository as LICENSE-AGPL3-FULL.txt.
+
+---
+AetherAI — For humanity. Forever.
+Copyright (C) 2026 H. Sharma. All rights reserved under AGPL v3.
